@@ -1,0 +1,76 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Azure DNS record",
+        "description": "The service principal needs the DNS Zone Contributor role on the zone.",
+        "data": {
+          "subscription_id": "Subscription ID",
+          "resource_group": "Resource group",
+          "zone_name": "DNS zone",
+          "record_name": "Record name",
+          "client_id": "Client ID",
+          "client_secret": "Client secret",
+          "tenant_id": "Tenant ID"
+        },
+        "data_description": {
+          "zone_name": "For example example.com",
+          "record_name": "Use @ for the zone itself, or a name such as home",
+          "client_id": "The application (client) ID of the service principal",
+          "client_secret": "The secret's Value, not its Secret ID",
+          "tenant_id": "Leave empty to look it up from the subscription"
+        }
+      },
+      "reauth_confirm": {
+        "title": "New client secret",
+        "description": "Azure no longer accepts the client secret for {name}. Client secrets expire, so you may need to create a new one in Microsoft Entra ID.",
+        "data": {
+          "client_secret": "Client secret"
+        },
+        "data_description": {
+          "client_secret": "The secret's Value, not its Secret ID"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to Azure.",
+      "invalid_auth": "Azure rejected the credentials. Check the client ID and tenant, and that the client secret is the secret's Value rather than its Secret ID.",
+      "forbidden": "The service principal has no access to this zone. Assign it the DNS Zone Contributor role.",
+      "zone_not_found": "DNS zone not found. Check the subscription, resource group and zone name.",
+      "tenant_not_found": "Could not look up the tenant. Check the subscription ID, or enter the tenant ID."
+    },
+    "abort": {
+      "already_configured": "This DNS record is already configured.",
+      "reauth_successful": "The client secret was updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Azure DNS Updater options",
+        "data": {
+          "update_interval": "Check interval (minutes)",
+          "ttl": "Record TTL (seconds)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "button": {
+      "sync_now": {
+        "name": "Sync now"
+      }
+    },
+    "sensor": {
+      "public_ip": {
+        "name": "Public IP"
+      },
+      "record_ip": {
+        "name": "DNS record IP"
+      },
+      "last_updated": {
+        "name": "Last DNS update"
+      }
+    }
+  }
+}
