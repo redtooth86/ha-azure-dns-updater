@@ -2,6 +2,27 @@
   "config": {
     "step": {
       "user": {
+        "title": "Azure credentials",
+        "description": "Use the credentials of a zone you've already added, or enter different ones.",
+        "data": {
+          "credentials": "Credentials"
+        }
+      },
+      "zone": {
+        "title": "Azure DNS record",
+        "description": "The service principal needs the DNS Zone Contributor role on this zone too.",
+        "data": {
+          "subscription_id": "Subscription ID",
+          "resource_group": "Resource group",
+          "zone_name": "DNS zone",
+          "record_name": "Record name"
+        },
+        "data_description": {
+          "zone_name": "For example example.com",
+          "record_name": "Use @ for the zone itself, or a name such as home"
+        }
+      },
+      "manual": {
         "title": "Azure DNS record",
         "description": "The service principal needs the DNS Zone Contributor role on the zone.",
         "data": {
@@ -23,7 +44,7 @@
       },
       "reauth_confirm": {
         "title": "New client secret",
-        "description": "Azure no longer accepts the client secret for {name}. Client secrets expire, so you may need to create a new one in Microsoft Entra ID.",
+        "description": "Azure no longer accepts the client secret for {name}. Client secrets expire, so you may need to create a new one in Microsoft Entra ID. The new secret is also saved for other zones that use the same client ID.",
         "data": {
           "client_secret": "Client secret"
         },

@@ -8,6 +8,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.config_entries import (
+    ConfigEntryState,
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlowWithReload,
@@ -45,14 +46,21 @@ from .const import (
 )
 from .coordinator import AzureDnsConfigEntry
 
+CONF_CREDENTIALS = "credentials"
+NEW_CREDENTIALS = "new"
+
 SECRET_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
 
-USER_SCHEMA = vol.Schema(
+ZONE_FIELDS: dict[vol.Marker, Any] = {
+    vol.Required(CONF_SUBSCRIPTION_ID): str,
+    vol.Required(CONF_RESOURCE_GROUP): str,
+    vol.Required(CONF_ZONE_NAME): str,
+    vol.Required(CONF_RECORD_NAME, default=APEX_RECORD): str,
+}
+ZONE_SCHEMA = vol.Schema(ZONE_FIELDS)
+MANUAL_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_SUBSCRIPTION_ID): str,
-        vol.Required(CONF_RESOURCE_GROUP): str,
-        vol.Required(CONF_ZONE_NAME): str,
-        vol.Required(CONF_RECORD_NAME, default=APEX_RECORD): str,
+        **ZONE_FIELDS,
         vol.Required(CONF_CLIENT_ID): str,
         vol.Required(CONF_CLIENT_SECRET): SECRET_SELECTOR,
         vol.Optional(CONF_TENANT_ID): str,
@@ -61,10 +69,19 @@ USER_SCHEMA = vol.Schema(
 REAUTH_SCHEMA = vol.Schema({vol.Required(CONF_CLIENT_SECRET): SECRET_SELECTOR})
 
 
+def _credentials_key(data: Mapping[str, Any]) -> str:
+    """Identify a service principal, which may be shared by several zones."""
+    return f"{data[CONF_TENANT_ID]}_{data[CONF_CLIENT_ID]}".lower()
+
+
 class AzureDnsConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Azure DNS Updater."""
 
     VERSION = 1
+
+    def __init__(self) -> None:
+        """Initialize the flow."""
+        self._credentials: dict[str, str] = {}
 
     @staticmethod
     @callback
@@ -73,6 +90,16 @@ class AzureDnsConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> AzureDnsOptionsFlow:
         """Return the options flow."""
         return AzureDnsOptionsFlow()
+
+    @callback
+    def _saved_credentials(self) -> dict[str, AzureDnsConfigEntry]:
+        """Return one entry per service principal, preferring working ones."""
+        saved: dict[str, AzureDnsConfigEntry] = {}
+        for entry in self._async_current_entries(include_ignore=False):
+            key = _credentials_key(entry.data)
+            if key not in saved or entry.state is ConfigEntryState.LOADED:
+                saved[key] = entry
+        return saved
 
     async def _async_validate(self, data: Mapping[str, Any]) -> str | None:
         """Check the settings against Azure, returning an error key on failure."""
@@ -98,51 +125,114 @@ class AzureDnsConfigFlow(ConfigFlow, domain=DOMAIN):
             return "cannot_connect"
         return None
 
+    async def _async_create(
+        self, user_input: Mapping[str, Any], errors: dict[str, str]
+    ) -> ConfigFlowResult | None:
+        """Validate the settings and create the entry, or fill in errors."""
+        data = {key: value.strip() for key, value in user_input.items()}
+        data[CONF_ZONE_NAME] = data[CONF_ZONE_NAME].rstrip(".").lower()
+        record = data[CONF_RECORD_NAME].rstrip(".").lower() or APEX_RECORD
+        data[CONF_RECORD_NAME] = record
+
+        await self.async_set_unique_id(
+            "_".join(
+                (
+                    data[CONF_SUBSCRIPTION_ID],
+                    data[CONF_RESOURCE_GROUP],
+                    data[CONF_ZONE_NAME],
+                    record,
+                )
+            ).lower()
+        )
+        self._abort_if_unique_id_configured()
+
+        if not data.get(CONF_TENANT_ID):
+            try:
+                data[CONF_TENANT_ID] = await async_discover_tenant(
+                    async_get_clientsession(self.hass),
+                    data[CONF_SUBSCRIPTION_ID],
+                )
+            except AzureNotFoundError:
+                errors[CONF_TENANT_ID] = "tenant_not_found"
+                return None
+            except AzureDnsError:
+                errors["base"] = "cannot_connect"
+                return None
+
+        if error := await self._async_validate(data):
+            errors["base"] = error
+            return None
+        zone = data[CONF_ZONE_NAME]
+        title = zone if record == APEX_RECORD else f"{record}.{zone}"
+        return self.async_create_entry(title=title, data=data)
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle the initial step."""
-        errors: dict[str, str] = {}
+        """Offer saved credentials if there are any, otherwise ask for them."""
+        saved = self._saved_credentials()
+        if not saved:
+            return await self.async_step_manual()
         if user_input is not None:
-            data = {key: value.strip() for key, value in user_input.items()}
-            data[CONF_ZONE_NAME] = data[CONF_ZONE_NAME].rstrip(".").lower()
-            record = data[CONF_RECORD_NAME].rstrip(".").lower() or APEX_RECORD
-            data[CONF_RECORD_NAME] = record
+            if (key := user_input[CONF_CREDENTIALS]) == NEW_CREDENTIALS:
+                return await self.async_step_manual()
+            entry = saved[key]
+            self._credentials = {
+                field: entry.data[field]
+                for field in (
+                    CONF_SUBSCRIPTION_ID,
+                    CONF_TENANT_ID,
+                    CONF_CLIENT_ID,
+                    CONF_CLIENT_SECRET,
+                )
+            }
+            return await self.async_step_zone()
 
-            await self.async_set_unique_id(
-                "_".join(
-                    (
-                        data[CONF_SUBSCRIPTION_ID],
-                        data[CONF_RESOURCE_GROUP],
-                        data[CONF_ZONE_NAME],
-                        record,
-                    )
-                ).lower()
-            )
-            self._abort_if_unique_id_configured()
-
-            if not data.get(CONF_TENANT_ID):
-                try:
-                    data[CONF_TENANT_ID] = await async_discover_tenant(
-                        async_get_clientsession(self.hass),
-                        data[CONF_SUBSCRIPTION_ID],
-                    )
-                except AzureNotFoundError:
-                    errors[CONF_TENANT_ID] = "tenant_not_found"
-                except AzureDnsError:
-                    errors["base"] = "cannot_connect"
-
-            if not errors:
-                if error := await self._async_validate(data):
-                    errors["base"] = error
-                else:
-                    zone = data[CONF_ZONE_NAME]
-                    title = zone if record == APEX_RECORD else f"{record}.{zone}"
-                    return self.async_create_entry(title=title, data=data)
-
+        choices = {
+            key: f"Client {entry.data[CONF_CLIENT_ID]} (used by {entry.title})"
+            for key, entry in saved.items()
+        }
+        choices[NEW_CREDENTIALS] = "Enter new credentials"
         return self.async_show_form(
             step_id="user",
-            data_schema=self.add_suggested_values_to_schema(USER_SCHEMA, user_input),
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_CREDENTIALS, default=next(iter(saved))): vol.In(
+                        choices
+                    )
+                }
+            ),
+        )
+
+    async def async_step_zone(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask only for the zone, reusing saved credentials."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if result := await self._async_create(
+                {**self._credentials, **user_input}, errors
+            ):
+                return result
+        return self.async_show_form(
+            step_id="zone",
+            data_schema=self.add_suggested_values_to_schema(
+                ZONE_SCHEMA, user_input or self._credentials
+            ),
+            errors=errors,
+        )
+
+    async def async_step_manual(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Ask for the zone and the credentials."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if result := await self._async_create(user_input, errors):
+                return result
+        return self.async_show_form(
+            step_id="manual",
+            data_schema=self.add_suggested_values_to_schema(MANUAL_SCHEMA, user_input),
             errors=errors,
         )
 
@@ -163,6 +253,17 @@ class AzureDnsConfigFlow(ConfigFlow, domain=DOMAIN):
             if error := await self._async_validate({**entry.data, **secret}):
                 errors["base"] = error
             else:
+                # Zones sharing this service principal need the new secret too.
+                # Reloading them also dismisses their own reauth prompts.
+                key = _credentials_key(entry.data)
+                for other in self._async_current_entries(include_ignore=False):
+                    if other.entry_id != entry.entry_id and (
+                        _credentials_key(other.data) == key
+                    ):
+                        self.hass.config_entries.async_update_entry(
+                            other, data={**other.data, **secret}
+                        )
+                        self.hass.config_entries.async_schedule_reload(other.entry_id)
                 return self.async_update_reload_and_abort(entry, data_updates=secret)
         return self.async_show_form(
             step_id="reauth_confirm",

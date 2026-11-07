@@ -41,7 +41,7 @@ Go to **Settings > Devices & services > Add integration > Azure DNS Updater** an
 | Client secret | | |
 | Tenant ID | `00000000-...` | Optional, looked up from the subscription if empty. |
 
-Add the integration once per record you want to manage.
+Add the integration once per record you want to manage. When you add another record, you can pick the credentials you've already entered and only fill in the zone. The service principal needs the DNS Zone Contributor role on each zone.
 
 Under **Configure** you can change the check interval (default 5 minutes) and record TTL (default 300 seconds).
 
@@ -58,7 +58,7 @@ At each interval the integration looks up your public IPv4 address and compares 
 
 The sensors become unavailable when a check fails, which you can use to trigger an alert.
 
-When the client secret expires, Home Assistant asks you for a new one under **Settings > Devices & services**.
+When the client secret expires, Home Assistant asks you for a new one under **Settings > Devices & services**. You only need to enter it once: it's also saved for every other record that uses the same client ID.
 
 ## Things to know
 

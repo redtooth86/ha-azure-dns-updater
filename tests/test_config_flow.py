@@ -3,6 +3,7 @@
 from unittest.mock import patch
 
 import pytest
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant
@@ -118,13 +119,99 @@ async def test_validation_errors(
     assert result["errors"] == {"base": error}
 
 
+async def test_first_entry_skips_credentials_choice(hass) -> None:
+    """With nothing saved yet, the full form is shown straight away."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+
+    assert result["step_id"] == "manual"
+
+
+async def test_saved_credentials_only_ask_for_zone(hass, entry, aioclient_mock) -> None:
+    """A second zone reuses the first zone's credentials."""
+    entry.add_to_hass(hass)
+    mock_token(aioclient_mock)
+    other_zone_url = ZONE_URL.replace("/rg/", "/other-rg/").replace(
+        "example.com", "example.net"
+    )
+    aioclient_mock.get(other_zone_url, json={"name": "example.net"})
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    assert result["step_id"] == "user"
+    [saved_key] = [
+        key
+        for key in result["data_schema"].schema["credentials"].container
+        if key != "new"
+    ]
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"credentials": saved_key}
+    )
+    assert result["step_id"] == "zone"
+    assert set(result["data_schema"].schema) == {
+        "subscription_id",
+        "resource_group",
+        "zone_name",
+        "record_name",
+    }
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {
+            "subscription_id": USER_INPUT["subscription_id"],
+            "resource_group": "other-rg",
+            "zone_name": "example.net",
+            "record_name": "@",
+        },
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["title"] == "example.net"
+    assert result["data"] == {
+        **entry.data,
+        "resource_group": "other-rg",
+        "zone_name": "example.net",
+    }
+
+
+async def test_choosing_new_credentials_shows_full_form(hass, entry) -> None:
+    """Different credentials can still be entered."""
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"credentials": "new"}
+    )
+
+    assert result["step_id"] == "manual"
+
+
 async def test_already_configured(hass, aioclient_mock) -> None:
     """The same record can't be added twice."""
     mock_token(aioclient_mock)
     aioclient_mock.get(ZONE_URL, json={"name": "example.com"})
-
     await submit(hass, {**USER_INPUT, "tenant_id": TENANT})
-    result = await submit(hass, {**USER_INPUT, "tenant_id": TENANT})
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    [saved_key] = [
+        key
+        for key in result["data_schema"].schema["credentials"].container
+        if key != "new"
+    ]
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"credentials": saved_key}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {key: USER_INPUT[key] for key in result["data_schema"].schema},
+    )
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
@@ -146,6 +233,42 @@ async def test_reauth_replaces_secret(hass, entry, aioclient_mock) -> None:
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
     assert entry.data["client_secret"] == "new-secret"
+
+
+async def test_reauth_updates_zones_sharing_credentials(
+    hass, entry, aioclient_mock
+) -> None:
+    """A new secret is saved for every zone using the same service principal."""
+    mock_token(aioclient_mock)
+    aioclient_mock.get(ZONE_URL, json={"name": "example.com"})
+    sibling = MockConfigEntry(
+        domain=DOMAIN,
+        title="example.net",
+        unique_id="sibling",
+        data={**entry.data, "zone_name": "example.net"},
+    )
+    unrelated = MockConfigEntry(
+        domain=DOMAIN,
+        title="example.org",
+        unique_id="unrelated",
+        data={**entry.data, "client_id": "other-client", "zone_name": "example.org"},
+    )
+    for config_entry in (entry, sibling, unrelated):
+        config_entry.add_to_hass(hass)
+    await sibling.start_reauth_flow(hass)
+
+    result = await entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"client_secret": "new-secret"}
+    )
+    await hass.async_block_till_done()
+
+    assert result["reason"] == "reauth_successful"
+    assert entry.data["client_secret"] == "new-secret"
+    assert sibling.data["client_secret"] == "new-secret"
+    assert unrelated.data["client_secret"] == "secret"
+    # The sibling's own prompt is dismissed because it no longer applies.
+    assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
 
 
 async def test_reauth_rejected_keeps_secret(hass, entry, aioclient_mock) -> None:
