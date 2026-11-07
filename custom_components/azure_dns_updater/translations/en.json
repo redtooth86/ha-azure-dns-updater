@@ -55,7 +55,7 @@
     },
     "error": {
       "cannot_connect": "Could not connect to Azure.",
-      "invalid_auth": "Azure rejected the credentials. Check the client ID and tenant, and that the client secret is the secret's Value rather than its Secret ID.",
+      "invalid_auth": "Azure rejected the credentials. Check the client ID and tenant, and that the client secret is the secret's Value rather than its Secret ID. Azure said: {error}",
       "forbidden": "The service principal has no access to this zone. Assign it the DNS Zone Contributor role.",
       "zone_not_found": "DNS zone not found. Check the subscription, resource group and zone name.",
       "tenant_not_found": "Could not look up the tenant. Check the subscription ID, or enter the tenant ID."

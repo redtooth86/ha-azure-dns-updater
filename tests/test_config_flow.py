@@ -191,6 +191,28 @@ async def test_choosing_new_credentials_shows_full_form(hass, entry) -> None:
     assert result["step_id"] == "manual"
 
 
+async def test_invalid_auth_shows_azure_reason(hass, aioclient_mock) -> None:
+    """Azure's reason is shown, without the trace and correlation IDs."""
+    aioclient_mock.post(
+        TOKEN_URL,
+        status=401,
+        json={
+            "error": "invalid_client",
+            "error_description": (
+                "AADSTS7000215: Invalid client secret provided. Trace ID: abc "
+                "Correlation ID: def Timestamp: 2026-11-07 21:10:50Z"
+            ),
+        },
+    )
+
+    result = await submit(hass, {**USER_INPUT, "tenant_id": TENANT})
+
+    assert result["errors"] == {"base": "invalid_auth"}
+    assert result["description_placeholders"]["error"] == (
+        "AADSTS7000215: Invalid client secret provided."
+    )
+
+
 async def test_already_configured(hass, aioclient_mock) -> None:
     """The same record can't be added twice."""
     mock_token(aioclient_mock)

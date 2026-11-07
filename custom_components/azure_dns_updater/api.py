@@ -161,7 +161,9 @@ class AzureDnsClient:
                 if response.status in (400, 401):
                     body = await response.json(content_type=None)
                     description = str(body.get("error_description", ""))
-                    raise AzureAuthError(description.split("\r\n")[0])
+                    # Keep the AADSTS code and reason, drop the trace IDs.
+                    description = description.split("\r\n")[0]
+                    raise AzureAuthError(description.split(" Trace ID:")[0])
                 response.raise_for_status()
                 body = await response.json()
         except (aiohttp.ClientError, TimeoutError, ValueError) as err:

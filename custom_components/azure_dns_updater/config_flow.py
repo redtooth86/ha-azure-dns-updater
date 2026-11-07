@@ -82,6 +82,8 @@ class AzureDnsConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize the flow."""
         self._credentials: dict[str, str] = {}
+        # Azure's own reason for rejecting the credentials, shown on the form.
+        self._auth_error = ""
 
     @staticmethod
     @callback
@@ -115,7 +117,8 @@ class AzureDnsConfigFlow(ConfigFlow, domain=DOMAIN):
         )
         try:
             await client.async_validate_zone()
-        except AzureAuthError:
+        except AzureAuthError as err:
+            self._auth_error = str(err) or "no reason given"
             return "invalid_auth"
         except AzureForbiddenError:
             return "forbidden"
@@ -219,6 +222,7 @@ class AzureDnsConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=self.add_suggested_values_to_schema(
                 ZONE_SCHEMA, user_input or self._credentials
             ),
+            description_placeholders={"error": self._auth_error},
             errors=errors,
         )
 
@@ -233,6 +237,7 @@ class AzureDnsConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="manual",
             data_schema=self.add_suggested_values_to_schema(MANUAL_SCHEMA, user_input),
+            description_placeholders={"error": self._auth_error},
             errors=errors,
         )
 
@@ -268,7 +273,7 @@ class AzureDnsConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="reauth_confirm",
             data_schema=REAUTH_SCHEMA,
-            description_placeholders={"name": entry.title},
+            description_placeholders={"name": entry.title, "error": self._auth_error},
             errors=errors,
         )
 
