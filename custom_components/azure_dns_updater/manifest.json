@@ -3,10 +3,10 @@
   "name": "Azure DNS Updater",
   "codeowners": ["@redtooth86"],
   "config_flow": true,
-  "documentation": "https://github.com/redtooth86/azure-dns-updater",
+  "documentation": "https://github.com/redtooth86/ha-azure-dns-updater",
   "integration_type": "service",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/redtooth86/azure-dns-updater/issues",
+  "issue_tracker": "https://github.com/redtooth86/ha-azure-dns-updater/issues",
   "requirements": [],
   "version": "1.0.0"
 }
