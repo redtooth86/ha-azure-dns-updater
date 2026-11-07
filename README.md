@@ -10,7 +10,7 @@ Based on the Python client in [frodehus/azure-dyndns](https://github.com/frodehu
 
 **Manually:** copy `custom_components/azure_dns_updater` into your Home Assistant `config/custom_components/` folder, then restart.
 
-Requires Home Assistant 2025.8 or newer.
+Requires Home Assistant 2025.8 or newer. The integration's icon shows in Home Assistant and HACS from 2026.3 onwards.
 
 ## Set up
 
